@@ -1,0 +1,134 @@
+# push main → 更新 nightly 這個 pre-release（tag 會移到最新 commit，APK 檔名固定）
+# push v* tag → 建立正式 release；tag 必須等於 v + app/build.gradle.kts 的 versionName
+name: Build
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+    paths-ignore: ['**.md'] # tag push 不看 path filter
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  # nightly 只需要最新那次；release 不要中途取消
+  cancel-in-progress: ${{ github.ref_type == 'branch' }}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - uses: gradle/actions/setup-gradle@v6
+
+      - name: Resolve version
+        id: version
+        run: |
+          base=$(sed -n 's/^ *versionName = "\(.*\)"$/\1/p' app/build.gradle.kts)
+          if [ -z "$base" ]; then
+            echo "::error::讀不到 app/build.gradle.kts 的 versionName"
+            exit 1
+          fi
+          if [ "$GITHUB_REF_TYPE" = tag ]; then
+            if [ "$GITHUB_REF_NAME" != "v$base" ]; then
+              echo "::error::tag $GITHUB_REF_NAME 與 versionName $base 不符，先改 build.gradle.kts 再打 tag"
+              exit 1
+            fi
+            suffix=""
+            apk="NetShift-$GITHUB_REF_NAME.apk"
+          else
+            suffix="-nightly.$GITHUB_RUN_NUMBER+${GITHUB_SHA::7}"
+            apk="NetShift-nightly.apk"
+          fi
+          {
+            echo "suffix=$suffix"
+            echo "name=$base$suffix"
+            echo "apk=$apk"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Decode keystore
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+        run: |
+          if [ -z "$KEYSTORE_BASE64" ]; then
+            echo "::error::缺少 KEYSTORE_BASE64 secret"
+            exit 1
+          fi
+          printf '%s' "$KEYSTORE_BASE64" | tr -d '[:space:]' | base64 -d > "$RUNNER_TEMP/release.jks"
+          echo "KEYSTORE_FILE=$RUNNER_TEMP/release.jks" >> "$GITHUB_ENV"
+
+      - name: Build release APK
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEYSTORE_ALIAS: ${{ secrets.KEYSTORE_ALIAS }}
+          VERSION_NAME_SUFFIX: ${{ steps.version.outputs.suffix }}
+        run: |
+          ./gradlew :app:assembleRelease -PversionNameSuffix="$VERSION_NAME_SUFFIX"
+
+      - name: Collect APK
+        env:
+          APK: ${{ steps.version.outputs.apk }}
+        run: |
+          # 沒簽到的話 AGP 只會產出 app-release-unsigned.apk，cp 會直接失敗
+          mkdir -p dist
+          cp app/build/outputs/apk/release/app-release.apk "dist/$APK"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: NetShift-${{ steps.version.outputs.name }}
+          path: dist/*.apk
+
+      - name: Publish nightly
+        if: github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION_NAME: ${{ steps.version.outputs.name }}
+          APK: ${{ steps.version.outputs.apk }}
+        run: |
+          # 把 nightly tag 移到這次的 commit（GITHUB_TOKEN 推的 tag 不會再觸發 workflow）
+          if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/nightly" >/dev/null 2>&1; then
+            gh api -X PATCH "repos/$GITHUB_REPOSITORY/git/refs/tags/nightly" \
+              -f sha="$GITHUB_SHA" -F force=true >/dev/null
+          else
+            gh api "repos/$GITHUB_REPOSITORY/git/refs" \
+              -f ref=refs/tags/nightly -f sha="$GITHUB_SHA" >/dev/null
+          fi
+
+          notes=$(cat <<EOF
+          自動建置，跟著 main 最新 commit 更新，可能不穩定。
+
+          - 版本：\`$VERSION_NAME\`
+          - Commit：$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/commit/$GITHUB_SHA
+          - 建置時間：$(date -u '+%Y-%m-%d %H:%M UTC')
+          - 訊息：$(git log -1 --format=%s)
+          EOF
+          )
+
+          if gh release view nightly >/dev/null 2>&1; then
+            gh release edit nightly --title "Nightly" --notes "$notes" --prerelease --latest=false
+            gh release upload nightly "dist/$APK" --clobber
+          else
+            gh release create nightly "dist/$APK" --title "Nightly" --notes "$notes" \
+              --prerelease --latest=false
+          fi
+
+      - name: Publish release
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          APK: ${{ steps.version.outputs.apk }}
+        run: |
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" "dist/$APK" --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" "dist/$APK" --title "NetShift $GITHUB_REF_NAME" \
+              --generate-notes --verify-tag
+          fi

@@ -61,6 +61,13 @@ netshift/
 adb install -r app/build/outputs/apk/debug/app-debug.apk
 ```
 
+### CI 發佈（`.github/workflows/build.yml`）
+
+- push 到 `main` → 更新 [Nightly](https://github.com/AvianJay/netshift/releases/tag/nightly) pre-release，APK 固定叫 `NetShift-nightly.apk`，versionName 帶 `-nightly.<run>+<sha>`。
+- push `v*` tag → 建立正式 release；tag 必須等於 `v` + `app/build.gradle.kts` 的 `versionName`，否則建置失敗。
+
+Repository secrets：`KEYSTORE_BASE64`（keystore 檔的 base64）、`KEYSTORE_PASSWORD`、`KEYSTORE_ALIAS`。本機沒設 `KEYSTORE_FILE` 等環境變數時，release 會輸出未簽章的 `app-release-unsigned.apk`。
+
 ## 安裝與授權 Shizuku / Sui
 
 App 只透過 Shizuku API 判斷可用性（`pingBinder()` + `checkSelfPermission()`），**不檢查** `moe.shizuku.privileged.api` 是否安裝，所以 Sui 使用者不需要 Shizuku App。

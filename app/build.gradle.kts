@@ -4,6 +4,9 @@ plugins {
     alias(libs.plugins.compose)
 }
 
+// CI 會把 KEYSTORE_BASE64 解碼成檔案並傳入路徑；本機沒設時 release 維持未簽章
+val releaseKeystore = providers.environmentVariable("KEYSTORE_FILE").orNull
+
 android {
     namespace = "tw.avianjay.netshift"
 
@@ -19,8 +22,24 @@ android {
         versionName = "0.1.0"
     }
 
+    signingConfigs {
+        if (releaseKeystore != null) {
+            create("release") {
+                val password = providers.environmentVariable("KEYSTORE_PASSWORD").get()
+                storeFile = file(releaseKeystore)
+                storePassword = password
+                keyAlias = providers.environmentVariable("KEYSTORE_ALIAS").get()
+                // 只有一組密碼 secret；PKCS12 keystore 的 key 密碼本來就必須和 store 相同
+                keyPassword = password
+            }
+        }
+    }
+
     buildTypes {
         release {
+            signingConfig = signingConfigs.findByName("release")
+            // nightly 由 workflow 帶 -PversionNameSuffix=-nightly.<run>+<sha>
+            versionNameSuffix = providers.gradleProperty("versionNameSuffix").orNull
             // Shizuku.newProcess 是用反射呼叫的；要開混淆請保留 proguard-rules.pro 裡的規則
             isMinifyEnabled = false
             proguardFiles(
