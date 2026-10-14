@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 只負責啟動瞬間的視窗外觀，其餘交給 Compose 的 MaterialTheme -->
+    <style name="Theme.NetShift" parent="android:Theme.Material.Light.NoActionBar" />
+</resources>
