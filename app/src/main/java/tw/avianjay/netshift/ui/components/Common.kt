@@ -1,6 +1,7 @@
 package tw.avianjay.netshift.ui.components
 
 import androidx.annotation.DrawableRes
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
@@ -22,6 +23,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
@@ -116,12 +118,16 @@ fun NoticeCard(
             contentColor = MaterialTheme.colorScheme.onErrorContainer,
         )
     } else {
+        // 不用 tertiaryContainer：部分動態配色在暗色模式下會給出很亮的黃色，文字和按鈕都看不清。
+        // 改在 surface 上疊一層淡 tertiary，深淺跟著 surface 走
         CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.tertiaryContainer,
-            contentColor = MaterialTheme.colorScheme.onTertiaryContainer,
+            containerColor = MaterialTheme.colorScheme.tertiary.copy(alpha = 0.16f)
+                .compositeOver(MaterialTheme.colorScheme.surfaceContainerHigh),
+            contentColor = MaterialTheme.colorScheme.onSurface,
         )
     }
-    Card(Modifier.fillMaxWidth(), colors = colors) {
+    val border = if (error) null else BorderStroke(1.dp, MaterialTheme.colorScheme.tertiary.copy(alpha = 0.6f))
+    Card(Modifier.fillMaxWidth(), colors = colors, border = border) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text(text, style = MaterialTheme.typography.bodyMedium)
             actions?.invoke()
